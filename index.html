@@ -1,1 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>小恐龍遊戲</title>
+    <!-- 引入 Tailwind CSS 快速排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 引入像素風格字體，增加懷舊感 */
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
+        body {
+            font-family: 'Press Start 2P', system-ui, sans-serif;
+            background-color: #f0f0f0;
+            /* 防止手機端雙擊縮放 */
+            touch-action: manipulation; 
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            /* 保持 800x300 的比例 */
+            aspect-ratio: 8 / 3;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            border: 3px solid #333;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+        }
+
+        .pixel-text {
+            font-family: 'Press Start 2P', monospace;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- 遊戲標題與設定區域 -->
+    <div class="mb-6 w-full max-w-3xl flex flex-col items-center gap-4">
+        <h1 class="text-xl md:text-2xl font-bold text-gray-800 text-center pixel-text tracking-widest flex items-center justify-center flex-wrap gap-2">
+            <input type="text" placeholder="Name" class="border border-gray-300 rounded-md bg-transparent text-center text-blue-600 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 w-32 md:w-48 placeholder-gray-300 hover:bg-gray-50 transition-all px-2 py-1"> 版小恐龍
+        </h1>
+        
+        <p class="text-xs text-gray-500 text-center leading-relaxed font-sans font-bold">
+            按 <kbd class="bg-gray-200 px-1 py-0.5 rounded border border-gray-300 shadow-sm">空白鍵</kbd> 或 <kbd class="bg-gray-200 px-1 py-0.5 rounded border border-gray-300 shadow-sm">↑</kbd> 跳躍 <br class="md:hidden"> (手機/平板請直接點擊遊戲畫面)
+        </p>
+    </div>
+
+    <!-- 遊戲主要畫布與 UI 覆蓋層 -->
+    <div id="game-container">
+        <!-- 畫布邏輯大小設為 800x300，透過 CSS 等比例縮放適應螢幕 -->
+        <canvas id="gameCanvas" width="800" height="300"></canvas>
+        
+        <!-- 開始畫面 -->
+        <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10 transition-opacity duration-300">
+            <button id="startBtn" class="pixel-text bg-green-500 text-white px-6 py-4 rounded-lg border-b-4 border-green-700 hover:bg-green-400 hover:border-green-600 active:border-b-0 active:translate-y-1 transition-all shadow-lg text-sm md:text-base animate-bounce">
+                點擊開始遊戲
+            </button>
+        </div>
+
+        <!-- 結束畫面 -->
+        <div id="gameOverScreen" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-black/20 backdrop-blur-sm z-10">
+            <h2 class="pixel-text text-2xl md:text-4xl text-red-600 mb-6 drop-shadow-[0_2px_2px_rgba(255,255,255,0.8)]">GAME OVER</h2>
+            <button id="restartBtn" class="pixel-text bg-gray-800 text-white px-6 py-3 rounded border-b-4 border-gray-900 hover:bg-gray-700 active:border-b-0 active:translate-y-1 transition-all shadow text-xs md:text-sm flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+                重新開始
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- 取得 DOM 元素 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        // --- 遊戲全域變數 ---
+        let reqId;                 // AnimationFrame ID
+        let gameActive = false;    // 遊戲狀態
+        let frames = 0;            // 經過的幀數
+        let score = 0;             // 當前分數
+        let highScore = localStorage.getItem('dinoHighScore') || 0; // 最高分 (存在瀏覽器)
+        
+        let gameSpeed = 6;         // 遊戲移動速度
+        const gravity = 0.6;       // 重力加速度
+        const groundY = 250;       // 地板的 Y 座標基準線
+
+        let customImg = null;      // 載入的自定義圖片
+
+        // --- 自定義角色圖片設定 ---
+        // 在這裡直接換成你要的圖片網址 (我先放一隻像素小恐龍當範例)
+        const CHARACTER_IMAGE_URL = 'dinosaur.png'; 
+        
+        if (CHARACTER_IMAGE_URL) {
+            const img = new Image();
+            img.onload = () => { 
+                customImg = img; 
+                // 若圖片載入完成且遊戲尚未開始，重新繪製以預覽新角色
+                if (!gameActive && frames === 0) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    player.draw();
+                    drawGround();
+                }
+            };
+            img.src = CHARACTER_IMAGE_URL;
+        }
+
+        // --- 玩家物件 (Player) ---
+        const player = {
+            x: 50,
+            y: groundY - 50,
+            w: 50, // 寬度
+            h: 50, // 高度
+            vy: 0, // Y軸速度
+            jumpForce: -12.5, // 跳躍力度
+            grounded: true,   // 是否在地上
+            
+            updatePosition() {
+                // 套用重力
+                this.vy += gravity;
+                this.y += this.vy;
+
+                // 碰撞地板檢測
+                if (this.y + this.h >= groundY) {
+                    this.y = groundY - this.h;
+                    this.vy = 0;
+                    this.grounded = true;
+                }
+            },
+
+            draw() {
+                if (customImg) {
+                    // 若有自定義圖片，維持長寬比繪製在碰撞框內
+                    const aspect = customImg.width / customImg.height;
+                    let drawW = this.w;
+                    let drawH = this.h;
+                    let offsetX = 0;
+                    let offsetY = 0;
+
+                    if (aspect > 1) {
+                        drawH = this.w / aspect;
+                        offsetY = this.h - drawH; // 靠底對齊
+                    } else {
+                        drawW = this.h * aspect;
+                        offsetX = (this.w - drawW) / 2; // 置中對齊
+                    }
+                    ctx.drawImage(customImg, this.x + offsetX, this.y + offsetY, drawW, drawH);
+                } else {
+                    // 預設為小恐龍 Emoji
+                    ctx.font = `${this.h}px Arial`;
+                    ctx.textBaseline = "top";
+                    // 稍微偏移以讓視覺更貼合地板
+                    ctx.fillText("🦖", this.x - 5, this.y + 5); 
+                }
+            },
+            
+            jump() {
+                // 只有在地上時才能跳躍
+                if (this.grounded) {
+                    this.vy = this.jumpForce;
+                    this.grounded = false;
+                }
+            }
+        };
+
+        // --- 障礙物與背景陣列 ---
+        const obstacles = [];
+        const clouds = [];
+
+        // 雲朵物件
+        class Cloud {
+            constructor() {
+                this.x = canvas.width;
+                this.y = Math.random() * (groundY - 100) + 20; // 隨機高度
+                this.speed = Math.random() * 0.5 + 0.5; // 隨機慢速
+                this.size = Math.random() * 20 + 30; // 隨機大小
+            }
+            updatePosition() {
+                this.x -= this.speed; // 雲朵緩慢向左移
+            }
+            draw() {
+                ctx.font = `${this.size}px Arial`;
+                ctx.textBaseline = "top";
+                ctx.fillText("☁️", this.x, this.y);
+            }
+        }
+
+        // 障礙物物件
+        class Obstacle {
+            constructor() {
+                // 隨機決定是地上仙人掌還是空中的鳥
+                this.type = Math.random() > 0.85 ? 'bird' : 'cactus';
+                this.x = canvas.width;
+                
+                if (this.type === 'bird') {
+                    this.w = 45;
+                    this.h = 40;
+                    // 鳥會在三種高度隨機出現：低、中、高
+                    const heights = [groundY - 40, groundY - 70, groundY - 100];
+                    this.y = heights[Math.floor(Math.random() * heights.length)];
+                } else {
+                    this.w = Math.random() > 0.5 ? 30 : 50; // 胖瘦
+                    this.h = Math.random() > 0.5 ? 50 : 75; // 高矮
+                    this.y = groundY - this.h;
+                }
+            }
+            updatePosition() {
+                // 根據遊戲速度向左移動 (鳥稍微快一點點)
+                this.x -= (this.type === 'bird' ? gameSpeed * 1.1 : gameSpeed);
+            }
+            draw() {
+                ctx.font = `${this.h}px Arial`;
+                ctx.textBaseline = "bottom"; // 從底部對齊，確保仙人掌緊貼地板
+                if(this.type === 'bird') {
+                    // 鳥會有翅膀拍動的效果 (依賴 frame 計算)
+                    const isWingUp = frames % 30 < 15;
+                    ctx.fillText(isWingUp ? "🦅" : "🦇", this.x, this.y + this.h);
+                } else {
+                    // 根據高度顯示不同植物
+                    let emoji = this.h > 60 ? "🌲" : "🌵";
+                    ctx.fillText(emoji, this.x, this.y + this.h);
+                }
+            }
+        }
+
+        // --- 輔助函式 ---
+        
+        // 畫地板線條
+        function drawGround() {
+            ctx.beginPath();
+            ctx.moveTo(0, groundY);
+            ctx.lineTo(canvas.width, groundY);
+            ctx.strokeStyle = '#535353';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 畫一些隨機的地板小斑點增加質感
+            ctx.fillStyle = '#535353';
+            for(let i=0; i<10; i++){
+                // 根據 frames 讓斑點有一點滾動感
+                let dotX = (i * 80 - (frames * gameSpeed) % 800 + 800) % 800;
+                ctx.fillRect(dotX, groundY + 5 + (i%3)*2, 3, 2);
+            }
+        }
+
+        // 碰撞偵測 (AABB)
+        function checkCollision(obs) {
+            // 縮小 X 軸容錯，讓判定更敏銳
+            const paddingX = 4; 
+            const paddingY = 6; 
+            if (player.x + paddingX < obs.x + obs.w - paddingX &&
+                player.x + player.w - paddingX > obs.x + paddingX &&
+                player.y + paddingY < obs.y + obs.h - paddingY &&
+                player.y + player.h - paddingY > obs.y + paddingY) {
+                return true;
+            }
+            return false;
+        }
+
+        // --- 主要遊戲邏輯 ---
+
+        function init() {
+            // 重置遊戲參數
+            player.y = groundY - player.h;
+            player.vy = 0;
+            player.grounded = true;
+            obstacles.length = 0;
+            clouds.length = 0;
+            score = 0;
+            frames = 0;
+            gameSpeed = 6;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            player.draw();
+            drawGround();
+            
+            // 預先生成幾朵雲
+            for(let i=0; i<3; i++) {
+                let c = new Cloud();
+                c.x = Math.random() * canvas.width;
+                clouds.push(c);
+            }
+        }
+
+        function startGame() {
+            if (gameActive) return;
+            startScreen.classList.add('opacity-0', 'pointer-events-none');
+            setTimeout(() => startScreen.classList.add('hidden'), 300);
+            gameOverScreen.classList.add('hidden');
+            
+            init();
+            gameActive = true;
+            gameLoop();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            cancelAnimationFrame(reqId);
+            gameOverScreen.classList.remove('hidden');
+            
+            // 儲存最高分
+            if (Math.floor(score) > highScore) {
+                highScore = Math.floor(score);
+                localStorage.setItem('dinoHighScore', highScore);
+            }
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+
+            // 1. 更新各物件位置 (先不繪製)
+            player.updatePosition();
+
+            // 處理雲朵位置
+            if (frames % 120 === 0) clouds.push(new Cloud());
+            for (let i = 0; i < clouds.length; i++) {
+                clouds[i].updatePosition();
+                if (clouds[i].x + 50 < 0) { // 離開螢幕
+                    clouds.splice(i, 1);
+                    i--;
+                }
+            }
+
+            // 處理障礙物位置
+            // 隨遊戲進行，障礙物生成的間隔會稍微縮短 (提升難度)
+            let spawnRate = Math.max(40, 90 - Math.floor(frames / 300));
+            if (frames % spawnRate === 0) {
+                obstacles.push(new Obstacle());
+            }
+
+            let collisionDetected = false;
+            let collidedObs = null;
+            for (let i = 0; i < obstacles.length; i++) {
+                obstacles[i].updatePosition();
+
+                // 檢測是否撞到
+                if (!collisionDetected && checkCollision(obstacles[i])) {
+                    collisionDetected = true;
+                    collidedObs = obstacles[i];
+                }
+
+                // 清除離開畫面的障礙物
+                if (obstacles[i].x + obstacles[i].w < 0) {
+                    obstacles.splice(i, 1);
+                    i--;
+                }
+            }
+
+            // 如果發生碰撞，將障礙物「退回」到剛好碰到的位置，完美解決「撞過頭」的視覺問題
+            if (collisionDetected && collidedObs) {
+                collidedObs.x = player.x + player.w - 6; 
+            }
+
+            // 2. 清空並繪製目前最新的畫面狀態
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGround();
+            clouds.forEach(c => c.draw());
+            obstacles.forEach(obs => obs.draw());
+            player.draw();
+
+            // 3. 處理碰撞 (畫出撞擊瞬間的畫面後立刻停止遊戲，不進行下一幀)
+            if (collisionDetected) {
+                gameOver();
+                return; 
+            }
+
+            // 顯示分數
+            score += 0.08; // 每幀增加分數
+            ctx.fillStyle = '#535353';
+            ctx.font = '16px "Press Start 2P", monospace';
+            ctx.textAlign = "right";
+            
+            const currentScoreStr = String(Math.floor(score)).padStart(5, '0');
+            const highScoreStr = String(Math.floor(Math.max(score, highScore))).padStart(5, '0');
+            
+            ctx.fillText(`HI ${highScoreStr}  ${currentScoreStr}`, canvas.width - 20, 30);
+
+            // 增加遊戲速度
+            gameSpeed += 0.001;
+            frames++;
+
+            // 請求下一幀
+            reqId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- 綁定操作事件 ---
+        
+        function handleAction(e) {
+            // 防止按下空白鍵時網頁捲動
+            if(e.type === 'keydown' && (e.code === 'Space' || e.code === 'ArrowUp')) {
+                e.preventDefault();
+            }
+
+            // 如果遊戲進行中，觸發跳躍
+            if (gameActive) {
+                player.jump();
+            } 
+            // 如果遊戲沒在進行，觸發開始/重新開始
+            else {
+                startGame();
+            }
+        }
+
+        // 鍵盤支援
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                handleAction(e);
+            }
+        });
+
+        // 滑鼠/觸控支援 (綁定在遊戲容器上避免影響 UI 按鈕)
+        const gameContainer = document.getElementById('game-container');
+        gameContainer.addEventListener('mousedown', handleAction);
+        gameContainer.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // 防止雙擊放大
+            handleAction(e);
+        }, { passive: false });
+
+        // 按鈕支援
+        startBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 避免觸發 gameContainer 的點擊
+            startGame();
+        });
+        restartBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startGame();
+        });
+
+        // 預先繪製一次初始畫面
+        init();
+
+    </script>
+</body>
+</html>
